@@ -6,7 +6,7 @@ import numpy as np
 from torch.distributions import Normal
 import time
 from collections import deque
-
+torch.autograd.set_detect_anomaly(True)
 # 定义策略网络（Policy Network）
 class PolicyNetwork(nn.Module):
     def __init__(self, obs_dim, act_dim):
@@ -68,12 +68,16 @@ class PPO:
         return torch.tensor(returns)
 
     def update(self):
-        states = torch.tensor([m[0] for m in self.memory], dtype=torch.float32)
-        # actions = torch.tensor([m[1].squeeze(0) for m in self.memory], dtype=torch.float32)  # 修正动作维度
-        actions = torch.tensor([m[1].squeeze() for m in self.memory], dtype=torch.float32)
-        old_log_probs = torch.tensor([m[2] for m in self.memory], dtype=torch.float32)
-        returns = torch.tensor([m[3] for m in self.memory], dtype=torch.float32)
+        states = torch.stack([torch.tensor(m[0], dtype=torch.float32) for m in self.memory])  # 堆叠状态张量
+        # 使用 torch.stack 堆叠张量列表
+        states = torch.stack([torch.tensor(m[0], dtype=torch.float32) for m in self.memory])  # 状态张量
+        actions = torch.stack([m[1].clone().detach().float() for m in self.memory])  # 修正：堆叠动作张量
+        old_log_probs = torch.stack([m[2].clone().detach().float() for m in self.memory])  # 修正：堆叠旧的 log_prob
+        returns = torch.stack([m[3].clone().detach().float() for m in self.memory])  # 修正：堆叠 returns
+
+        # 计算优势函数
         advantages = returns - self.value_net(states).squeeze()
+        # advantage shpae: torch.Size([num_episodes])
 
         for _ in range(self.epochs):
             for i in range(0, len(states), self.batch_size):
@@ -87,14 +91,16 @@ class PPO:
                 # Compute new log probabilities
                 mean = self.policy_net(batch_states)
                 dist = Normal(mean, 1.0)  # 假设标准差为1
-                log_probs = dist.log_prob(batch_actions)
+                log_probs = dist.log_prob(batch_actions) # [10, 17]
 
                 # Compute the ratio
                 ratio = torch.exp(log_probs - batch_old_log_probs)
-
+            # print("size:",log_probs.shape, batch_old_log_probs.shape,ratio.shape)
+            # print("batch_advantages:",batch_advantages.shape)
                 # Clip objective
-                obj = ratio * batch_advantages
-                obj_clipped = torch.clip(ratio, 1 - self.clip_epsilon, 1 + self.clip_epsilon) * batch_advantages
+                obj = ratio * batch_advantages.unsqueeze(1)
+            # print("pbj.shape",obj.shape)
+                obj_clipped = torch.clip(ratio, 1 - self.clip_epsilon, 1 + self.clip_epsilon) * batch_advantages.unsqueeze(1)
                 loss_policy = -torch.min(obj, obj_clipped).mean()
 
                 # Value loss (mean squared error)
@@ -107,11 +113,12 @@ class PPO:
                 loss = loss_policy + 0.5 * loss_value - self.entropy_coef * entropy_loss
 
                 # Update networks
+                loss.backward(retain_graph=True)
                 self.optimizer_policy.zero_grad()
                 self.optimizer_value.zero_grad()
-                loss.backward()
                 self.optimizer_policy.step()
                 self.optimizer_value.step()
+                
 
 
     def train(self, num_episodes=1000):
@@ -128,10 +135,12 @@ class PPO:
 
                 episode_rewards += reward
                 episode_states.append(state)
-                episode_actions.append(action)
-                episode_log_probs.append(log_prob)
+                episode_actions.append(action.squeeze(0))
+                # action.shape: torch.Size([1, 17])
+                # log_prob.shape: torch.Size([1, 17])
+                episode_log_probs.append(log_prob.squeeze(0))
                 episode_rewards_list.append(reward)
-                episode_dones.append(done)
+                episode_dones.append(done) # bool
 
                 state = next_state
 
@@ -146,9 +155,9 @@ class PPO:
                     break
 
 # 创建环境
-env = gym.make('HumanoidStandup-v4', render_mode=None) # render_mode="human"
+env = gym.make('HumanoidStandup-v5', render_mode=None) # render_mode="human"
 
-# 获取状态和动作空间的维度
+# 获取状态和动作空间的维度: 348,17
 obs_dim = env.observation_space.shape[0]
 act_dim = env.action_space.shape[0]  # Humanoid 是连续动作空间
 
@@ -157,7 +166,7 @@ policy_net = PolicyNetwork(obs_dim, act_dim)
 value_net = ValueNetwork(obs_dim)
 
 # 创建 PPO 实例
-ppo = PPO(env, policy_net, value_net, lr=3e-4, gamma=0.99, clip_epsilon=0.2, batch_size=64, epochs=10)
+ppo = PPO(env, policy_net, value_net, lr=3e-4, gamma=0.99, clip_epsilon=0.2, batch_size=10, epochs=10)
 
 # 训练 PPO
 ppo.train(num_episodes=1000)
