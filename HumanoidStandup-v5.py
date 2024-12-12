@@ -7,6 +7,7 @@ from torch.distributions import Normal
 import time
 import matplotlib.pyplot as plt
 from collections import deque
+from tqdm import tqdm
 
 torch.autograd.set_detect_anomaly(True)
 
@@ -123,7 +124,7 @@ class PPO:
 
     def train(self, num_episodes=1000):
         cum_rewards = []
-        for episode in range(num_episodes):
+        for episode in tqdm(range(num_episodes)):
             state, _ = self.env.reset()
             episode_rewards = 0
             episode_states, episode_actions, episode_log_probs, episode_rewards_list, episode_dones = [], [], [], [], []
@@ -132,7 +133,7 @@ class PPO:
             gamma_k = 1
             while not done:
                 action, log_prob = self.select_action(state)
-                next_state, reward, done, truncated, info = self.env.step(action.squeeze(0).numpy())
+                next_state, reward, done, truncated, info = self.env.step(action.squeeze(0).cpu().numpy())
 
                 episode_rewards += reward * gamma_k
                 gamma_k *= self.gamma
@@ -157,6 +158,10 @@ class PPO:
                     break
         return cum_rewards
 
+num_episodes = 3000
+batch_size = 200
+
+
 # 创建环境
 env = gym.make('HumanoidStandup-v5', render_mode=None) # render_mode="human"
 
@@ -169,9 +174,9 @@ policy_net = PolicyNetwork(obs_dim, act_dim)
 value_net = ValueNetwork(obs_dim)
 
 # 创建 PPO 实例
-ppo = PPO(env, policy_net, value_net, lr=3e-4, gamma=0.9, clip_epsilon=0.2, batch_size=10, epochs=10)
+ppo = PPO(env, policy_net, value_net, lr=3e-3, gamma=0.9, clip_epsilon=0.2, batch_size=batch_size, epochs=10)
 
-num_episodes = 1000
+
 # 训练 PPO
 cum_rewards = ppo.train(num_episodes=num_episodes)
 
