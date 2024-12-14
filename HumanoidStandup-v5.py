@@ -13,6 +13,7 @@ torch.autograd.set_detect_anomaly(True)
 
 # 检查是否有 CUDA
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+#device = torch.device("cpu")
 
 # 定义策略网络（Policy Network）
 class PolicyNetwork(nn.Module):
@@ -158,7 +159,7 @@ class PPO:
                     break
         return cum_rewards
 
-num_episodes = 3000
+num_episodes = 1000
 batch_size = 200
 
 
